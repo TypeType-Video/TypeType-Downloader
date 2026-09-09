@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,7 +15,7 @@ import (
 type DragonflySink struct {
 	client *redis.Client
 	ttl    time.Duration
-	queue  chan *job.Record
+	writer *jobWriter
 }
 
 func OpenDragonfly(addr string, ttlSeconds int) *DragonflySink {
@@ -21,33 +23,27 @@ func OpenDragonfly(addr string, ttlSeconds int) *DragonflySink {
 		ttlSeconds = 600
 	}
 	sink := &DragonflySink{
-		client: redis.NewClient(&redis.Options{Addr: addr}),
+		client: redis.NewClient(&redis.Options{Addr: addr, ContextTimeoutEnabled: true}),
 		ttl:    time.Duration(ttlSeconds) * time.Second,
-		queue:  make(chan *job.Record, 2048),
 	}
-	go sink.run()
+	sink.writer = newJobWriter(sink.save, time.Second, persistenceShutdownTimeout)
 	return sink
 }
 
-func (s *DragonflySink) Close() error { return s.client.Close() }
+func (s *DragonflySink) Close() error {
+	err := s.writer.close()
+	if err != nil {
+		slog.Error("dragonfly persistence shutdown", "error", err)
+	}
+	return errors.Join(err, s.client.Close())
+}
 
 func (s *DragonflySink) Name() string { return "dragonfly" }
 
 func (s *DragonflySink) Health(ctx context.Context) error { return s.client.Ping(ctx).Err() }
 
 func (s *DragonflySink) SaveJob(record *job.Record) {
-	select {
-	case s.queue <- record:
-	default:
-	}
-}
-
-func (s *DragonflySink) run() {
-	for record := range s.queue {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		_ = s.save(ctx, record)
-		cancel()
-	}
+	s.writer.enqueue(record)
 }
 
 func (s *DragonflySink) save(ctx context.Context, record *job.Record) error {

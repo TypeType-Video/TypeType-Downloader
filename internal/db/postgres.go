@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,8 +13,8 @@ import (
 )
 
 type PostgresSink struct {
-	pool  *pgxpool.Pool
-	queue chan *job.Record
+	pool   *pgxpool.Pool
+	writer *jobWriter
 }
 
 func OpenPostgres(ctx context.Context, databaseURL string) (*PostgresSink, error) {
@@ -25,30 +26,24 @@ func OpenPostgres(ctx context.Context, databaseURL string) (*PostgresSink, error
 		pool.Close()
 		return nil, err
 	}
-	sink := &PostgresSink{pool: pool, queue: make(chan *job.Record, 2048)}
-	go sink.run()
+	sink := &PostgresSink{pool: pool}
+	sink.writer = newJobWriter(sink.upsert, 5*time.Second, persistenceShutdownTimeout)
 	return sink, nil
 }
 
-func (s *PostgresSink) Close() { s.pool.Close() }
+func (s *PostgresSink) Close() {
+	if err := s.writer.close(); err != nil {
+		slog.Error("postgres persistence shutdown", "error", err)
+	}
+	s.pool.Close()
+}
 
 func (s *PostgresSink) Name() string { return "postgres" }
 
 func (s *PostgresSink) Health(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 func (s *PostgresSink) SaveJob(record *job.Record) {
-	select {
-	case s.queue <- record:
-	default:
-	}
-}
-
-func (s *PostgresSink) run() {
-	for record := range s.queue {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = s.upsert(ctx, record)
-		cancel()
-	}
+	s.writer.enqueue(record)
 }
 
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
