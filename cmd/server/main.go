@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,19 +20,22 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := run(ctx, config.Load()); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+}
 
+func run(ctx context.Context, cfg config.Config) error {
 	files, err := artifactStore(cfg)
 	if err != nil {
-		slog.Error("artifact store failed", "error", err)
-		os.Exit(1)
+		return err
 	}
 	sinks, health, restored, pending, cleanupFn, err := sinks(ctx, cfg)
 	if err != nil {
-		slog.Error("persistence failed", "error", err)
-		os.Exit(1)
+		return err
 	}
 	defer cleanupFn()
 	store := job.NewStore(cfg.PublicBaseURL, sinks...)
@@ -41,12 +43,16 @@ func main() {
 	pendingIDs := store.RestorePending(pending)
 	disk, err := storage.NewMonitor(cfg.DataDir, cfg.MinFreeBytes, cfg.MinFreePercent)
 	if err != nil {
-		slog.Error("storage monitor failed", "error", err)
-		os.Exit(1)
+		return err
 	}
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	runner := pipeline.NewRunner(cfg, store, files, disk)
-	runner.Start(ctx)
-	cleanup.Start(ctx, cfg.DataDir, cfg.StorageBackend)
+	runner.Start(workerCtx)
+	defer func() {
+		cancelWorkers()
+		runner.Wait()
+	}()
+	cleanup.Start(workerCtx, cfg.DataDir, cfg.StorageBackend)
 	for _, id := range pendingIDs {
 		if err := runner.EnqueueBlocking(ctx, id); err != nil {
 			slog.Warn("failed to restore queued job", "id", id, "error", err)
@@ -56,18 +62,8 @@ func main() {
 	health = append(health, files)
 	handler := api.NewServer(store, runner, files, disk, health...).Routes()
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
-
 	slog.Info("server listening", "addr", cfg.HTTPAddr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("server failed", "error", err)
-		os.Exit(1)
-	}
+	return serve(ctx, server)
 }
 
 func artifactStore(cfg config.Config) (artifact.Store, error) {
@@ -99,16 +95,19 @@ func sinks(ctx context.Context, cfg config.Config) ([]job.Sink, []api.HealthChec
 	}
 	postgres, err := db.OpenPostgres(ctx, cfg.DatabaseURL)
 	if err != nil {
+		cleanup()
 		return nil, nil, nil, nil, nil, err
 	}
 	restored, err := postgres.LoadDone(ctx)
 	if err != nil {
 		postgres.Close()
+		cleanup()
 		return nil, nil, nil, nil, nil, err
 	}
 	pending, err := postgres.LoadRunnable(ctx)
 	if err != nil {
 		postgres.Close()
+		cleanup()
 		return nil, nil, nil, nil, nil, err
 	}
 	out = append(out, postgres)
