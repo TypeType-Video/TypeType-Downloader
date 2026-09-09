@@ -20,15 +20,15 @@ func (s *Store) toResponse(record *Record) Response {
 		URL:        record.URL,
 		Status:     record.Status,
 		Title:      record.Title,
-		Error:      record.Error,
-		ErrorCode:  record.ErrorCode,
-		Resolved:   record.Resolved,
+		Error:      cloneString(record.Error),
+		ErrorCode:  cloneString(record.ErrorCode),
+		Resolved:   cloneResolved(record.Resolved),
 		QueuedAt:   formatTime(record.QueuedAt),
 		StartedAt:  formatTimePtr(record.StartedAt),
 		FinishedAt: formatTimePtr(record.FinishedAt),
-		DownloadMs: record.DownloadMs,
-		MuxMs:      record.MuxMs,
-		TotalMs:    record.TotalMs,
+		DownloadMs: cloneInt64(record.DownloadMs),
+		MuxMs:      cloneInt64(record.MuxMs),
+		TotalMs:    cloneInt64(record.TotalMs),
 	}
 	if record.Artifact != "" {
 		artifactURL := s.baseURL + "/jobs/" + record.ID + "/artifact"

@@ -11,9 +11,16 @@ func cloneRecord(record *Record) *Record {
 	copy.MuxMs = cloneInt64(record.MuxMs)
 	copy.TotalMs = cloneInt64(record.TotalMs)
 	if record.Resolved != nil {
-		resolved := *record.Resolved
-		copy.Resolved = &resolved
+		copy.Resolved = cloneResolved(record.Resolved)
 	}
+	return &copy
+}
+
+func cloneResolved(value *ResolvedOutput) *ResolvedOutput {
+	if value == nil {
+		return nil
+	}
+	copy := *value
 	return &copy
 }
 
