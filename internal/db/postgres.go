@@ -71,7 +71,7 @@ func (s *PostgresSink) upsert(ctx context.Context, record *job.Record) error {
 	}
 	_, err = s.pool.Exec(ctx, upsertSQL,
 		record.ID, record.CacheKey, record.URL, string(record.Status), record.Title,
-		options, progress, resolved, record.Artifact, record.Storage,
+		string(options), string(progress), string(resolved), record.Artifact, record.Storage,
 		record.ExpiresAt, stringPtr(record.Error), stringPtr(record.ErrorCode), record.QueuedAt,
 		record.StartedAt, record.FinishedAt, record.DownloadMs, record.MuxMs, record.TotalMs,
 	)
