@@ -41,7 +41,7 @@ func TestMonitorUsesPercentageThreshold(t *testing.T) {
 }
 
 func TestMonitorTracksAndReleasesReservations(t *testing.T) {
-	monitor, err := NewMonitor(t.TempDir(), 1, 1)
+	monitor, err := NewMonitor(t.TempDir(), 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestMonitorTracksAndReleasesReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reserved := capacity.FreeBytes - capacity.RequiredFreeBytes
+	const reserved = uint64(1 << 20)
 	release, err := monitor.Reserve("job", reserved)
 	if err != nil {
 		t.Fatal(err)

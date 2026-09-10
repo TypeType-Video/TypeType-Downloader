@@ -71,22 +71,20 @@ func (s *Store) Create(rawURL string, options Options, authorization string) (*R
 	if err != nil {
 		return nil, false, false, err
 	}
-	s.mu.RLock()
-	if existingID := s.cache[cacheKey]; existingID != "" {
-		if existing := s.jobs[existingID]; existing != nil && existing.Status != StatusFailed {
-			cached := existing.Status == StatusDone
-			record := cloneRecord(existing)
-			s.mu.RUnlock()
-			return record, cached, false, nil
-		}
-	}
-	s.mu.RUnlock()
 	id, err := newID()
 	if err != nil {
 		return nil, false, false, err
 	}
 	record := &Record{ID: id, CacheKey: cacheKey, URL: rawURL, Authorization: authorization, Options: options, Status: StatusQueued, QueuedAt: time.Now()}
 	s.mu.Lock()
+	if existingID := s.cache[cacheKey]; existingID != "" {
+		if existing := s.jobs[existingID]; existing != nil && existing.Status != StatusFailed {
+			cached := existing.Status == StatusDone
+			snapshot := cloneRecord(existing)
+			s.mu.Unlock()
+			return snapshot, cached, false, nil
+		}
+	}
 	s.jobs[id] = record
 	s.cache[cacheKey] = id
 	s.mu.Unlock()
@@ -98,11 +96,14 @@ func (s *Store) Create(rawURL string, options Options, authorization string) (*R
 func (s *Store) Get(id string) (*Record, bool) {
 	s.mu.RLock()
 	record, ok := s.jobs[id]
+	if ok {
+		record = cloneRecord(record)
+	}
 	s.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
-	return cloneRecord(record), true
+	return record, true
 }
 
 func (s *Store) Start(id string, cancel func()) bool {

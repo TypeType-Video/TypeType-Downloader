@@ -2,6 +2,7 @@ package job
 
 import (
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -26,6 +27,70 @@ func TestStoreCreateStartProgressDone(t *testing.T) {
 	}
 	if response.ProgressPercent == nil || *response.ProgressPercent != 100 {
 		t.Fatalf("progress = %#v, want 100", response.ProgressPercent)
+	}
+}
+
+func TestStoreCreateIsAtomicForConcurrentDuplicateRequests(t *testing.T) {
+	store := NewStore("http://localhost")
+	const callers = 32
+	start := make(chan struct{})
+	results := make(chan *Record, callers)
+	created := make(chan bool, callers)
+	var group sync.WaitGroup
+	for range callers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			record, _, wasCreated, err := store.Create("https://example.com/watch?v=duplicate", Options{Container: "mp4"}, "")
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			results <- record
+			created <- wasCreated
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	close(created)
+	var firstID string
+	createdCount := 0
+	for record := range results {
+		if firstID == "" {
+			firstID = record.ID
+		}
+		if record.ID != firstID {
+			t.Fatalf("duplicate request created %s and %s", firstID, record.ID)
+		}
+	}
+	for wasCreated := range created {
+		if wasCreated {
+			createdCount++
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("created count = %d, want 1", createdCount)
+	}
+}
+
+func TestStoreGetAndResponseReturnSnapshots(t *testing.T) {
+	store := NewStore("http://localhost")
+	record, _, _, err := store.Create("https://example.com/watch?v=snapshot", Options{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := "original"
+	store.Fail(record.ID, "failure", errors.New(message))
+	snapshot, ok := store.Get(record.ID)
+	if !ok || snapshot.Error == nil {
+		t.Fatal("missing error snapshot")
+	}
+	*snapshot.Error = "changed"
+	response, ok := store.Response(record.ID)
+	if !ok || response.Error == nil || *response.Error != message {
+		t.Fatalf("response error = %#v", response.Error)
 	}
 }
 
