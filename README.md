@@ -1,10 +1,10 @@
-U want to know the current position of TypeType about AI ? Go check [this](https://github.com/TypeType-Video/TypeType/blob/dev/AI_TRANSPARENCY.md).
-
 <div align="center">
   <img src="https://raw.githubusercontent.com/TypeType-Video/TypeType/main/assets/banner.svg" alt="TypeType" width="100%">
   <h1>TypeType Downloader</h1>
   <p>The native download and muxing service for TypeType.</p>
 </div>
+
+You want to know the current position of TypeType about AI ? Go check [this](https://github.com/TypeType-Video/TypeType/blob/dev/AI_TRANSPARENCY.md).
 
 TypeType-Downloader receives jobs from [TypeType-Server](https://github.com/TypeType-Video/TypeType-Server), downloads the selected media streams, muxes audio and video without re-encoding, and publishes the finished artifact through local or S3-compatible storage.
 
