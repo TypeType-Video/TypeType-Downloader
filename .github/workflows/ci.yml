@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   go:
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","X64","r730","downloader"]') }}
+    runs-on: [self-hosted, Linux, X64, ci-stack]
     permissions:
       contents: read
     steps:
@@ -60,7 +60,7 @@ jobs:
 
   docker:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, ci-stack]
     permissions:
       contents: read
     steps:
