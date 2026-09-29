@@ -1,0 +1,93 @@
+clone:
+  git:
+    image: woodpeckerci/plugin-git:2.10.0
+    settings:
+      partial: false
+      depth: 0
+
+when:
+  - event: push
+    branch: [dev, main]
+  - event: tag
+  - event: manual
+
+services:
+  docker:
+    image: docker:29.1.3-dind@sha256:64d6ee47ea821c986467199baa162f5ac8cde3f57b719f18e23f3ed7a7444131
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    commands:
+      - dockerd-entrypoint.sh --host=tcp://0.0.0.0:2375 --tls=false --insecure-registry=registry:5000
+
+steps:
+  - name: wait-docker
+    image: docker:29.1.3-cli@sha256:e0b6ff45302985d99b9685b2a2fec50c3379bd47067493968f51da901dc53ad5
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+    commands:
+      - |
+        for attempt in $$(seq 1 60); do
+          if docker info >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 1
+        done
+        exit 1
+
+  - name: publish
+    image: docker:29.1.3-cli@sha256:e0b6ff45302985d99b9685b2a2fec50c3379bd47067493968f51da901dc53ad5
+    depends_on: [wait-docker]
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+      GHCR_USER:
+        from_secret: ghcr_username
+      GHCR_TOKEN:
+        from_secret: ghcr_token
+    commands:
+      - |
+        set -eu
+        base_version="$$(tr -d '[:space:]' < VERSION)"
+        event="$${CI_PIPELINE_EVENT}"
+        branch="$${CI_COMMIT_BRANCH:-}"
+        tag_name="$${CI_COMMIT_TAG:-}"
+
+        if [ "$${event}" = "tag" ]; then
+          version="$${tag_name#v}"
+          local_repo=registry:5000/typetype/downloader
+          ghcr_repo=ghcr.io/typetype-video/typetype-downloader
+          tags="$${version} $${tag_name} latest"
+        elif [ "$${branch}" = "dev" ]; then
+          version="$${base_version}-dev.$${CI_PIPELINE_NUMBER}"
+          local_repo=registry:5000/typetype/downloader-beta
+          ghcr_repo=ghcr.io/typetype-video/typetype-downloader-beta
+          tags="dev beta latest $${version}"
+        else
+          version="$${base_version}"
+          local_repo=registry:5000/typetype/downloader
+          ghcr_repo=ghcr.io/typetype-video/typetype-downloader
+          tags="main latest $${version}"
+        fi
+
+        build_time="$$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '%s' "$${GHCR_TOKEN}" |
+          docker login ghcr.io -u "$${GHCR_USER}" --password-stdin
+
+        docker build --pull \
+          --file Dockerfile.wolfi \
+          --build-arg "BUILD_VERSION=$${version}" \
+          --build-arg "BUILD_REVISION=$${CI_COMMIT_SHA}" \
+          --build-arg "BUILD_TIME=$${build_time}" \
+          -t "$${local_repo}:$${version}" .
+
+        for tag in $${tags}; do
+          docker tag "$${local_repo}:$${version}" "$${local_repo}:$${tag}"
+          docker tag "$${local_repo}:$${version}" "$${ghcr_repo}:$${tag}"
+        done
+
+        for tag in $${tags}; do
+          docker push "$${local_repo}:$${tag}"
+          docker push "$${ghcr_repo}:$${tag}"
+        done
+
+        echo "Published $${version}"

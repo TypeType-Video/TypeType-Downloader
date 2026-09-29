@@ -1,0 +1,26 @@
+clone:
+  git:
+    image: woodpeckerci/plugin-git:2.10.0
+    settings:
+      partial: false
+      depth: 0
+      fetch-target-branch: true
+
+when:
+  - event: push
+    branch: [dev, main]
+  - event: pull_request
+  - event: manual
+
+steps:
+  - name: go
+    image: cgr.dev/chainguard/go:latest-dev@sha256:dba732c8ee8019e83e38c0690a853153ed6f3f55be22e60395578fdc9f967f7e
+    commands:
+      - |
+        set -eu
+        apk add --no-cache build-base pkgconf ffmpeg-8.1-dev
+        test -z "$$(gofmt -l cmd internal)"
+        go test ./...
+        go build ./...
+        bash -n scripts/e2e-beta.sh
+        bash -n scripts/bench-beta.sh
