@@ -35,15 +35,8 @@ steps:
         done
         exit 1
 
-  - name: publish
+  - name: prepare
     image: docker:29.1.3-cli@sha256:e0b6ff45302985d99b9685b2a2fec50c3379bd47067493968f51da901dc53ad5
-    depends_on: [wait-docker]
-    environment:
-      DOCKER_HOST: tcp://docker:2375
-      GHCR_USER:
-        from_secret: ghcr_username
-      GHCR_TOKEN:
-        from_secret: ghcr_token
     commands:
       - |
         set -eu
@@ -69,25 +62,137 @@ steps:
           tags="main latest $${version}"
         fi
 
+        {
+          printf "VERSION='%s'\n" "$${version}"
+          printf "LOCAL_REPO='%s'\n" "$${local_repo}"
+          printf "GHCR_REPO='%s'\n" "$${ghcr_repo}"
+          printf "TAGS='%s'\n" "$${tags}"
+        } > .woodpecker-publish.env
+
+  - name: publish-amd64
+    image: docker:29.1.3-cli@sha256:e0b6ff45302985d99b9685b2a2fec50c3379bd47067493968f51da901dc53ad5
+    depends_on: [wait-docker, prepare]
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+      GHCR_USER:
+        from_secret: ghcr_username
+      GHCR_TOKEN:
+        from_secret: ghcr_token
+    commands:
+      - |
+        set -eu
+        set -a
+        . ./.woodpecker-publish.env
+        set +a
         build_time="$$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf '%s' "$${GHCR_TOKEN}" |
           docker login ghcr.io -u "$${GHCR_USER}" --password-stdin
 
-        docker build --pull \
+        docker build --pull --platform linux/amd64 \
+          --provenance=false --sbom=false \
           --file Dockerfile.wolfi \
-          --build-arg "BUILD_VERSION=$${version}" \
+          --build-arg "BUILD_VERSION=$${VERSION}" \
           --build-arg "BUILD_REVISION=$${CI_COMMIT_SHA}" \
           --build-arg "BUILD_TIME=$${build_time}" \
-          -t "$${local_repo}:$${version}" .
+          -t "$${LOCAL_REPO}:$${VERSION}" .
 
-        for tag in $${tags}; do
-          docker tag "$${local_repo}:$${version}" "$${local_repo}:$${tag}"
-          docker tag "$${local_repo}:$${version}" "$${ghcr_repo}:$${tag}"
+        for tag in $${TAGS}; do
+          docker tag "$${LOCAL_REPO}:$${VERSION}" "$${LOCAL_REPO}:$${tag}"
+          docker tag "$${LOCAL_REPO}:$${VERSION}" "$${LOCAL_REPO}:$${tag}-amd64"
+          docker tag "$${LOCAL_REPO}:$${VERSION}" "$${GHCR_REPO}:$${tag}"
+          docker tag "$${LOCAL_REPO}:$${VERSION}" "$${GHCR_REPO}:$${tag}-amd64"
         done
 
-        for tag in $${tags}; do
-          docker push "$${local_repo}:$${tag}"
-          docker push "$${ghcr_repo}:$${tag}"
+        for tag in $${TAGS}; do
+          docker push "$${LOCAL_REPO}:$${tag}"
+          docker push "$${LOCAL_REPO}:$${tag}-amd64"
+          docker push "$${GHCR_REPO}:$${tag}"
+          docker push "$${GHCR_REPO}:$${tag}-amd64"
         done
 
-        echo "Published $${version}"
+        echo "Published $${VERSION} for linux/amd64"
+
+  - name: publish-arm64
+    image: docker:29.1.3-cli@sha256:e0b6ff45302985d99b9685b2a2fec50c3379bd47067493968f51da901dc53ad5
+    depends_on: [wait-docker, prepare]
+    when:
+      - event: push
+        branch: main
+      - event: tag
+      - event: manual
+        branch: main
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+      GHCR_USER:
+        from_secret: ghcr_username
+      GHCR_TOKEN:
+        from_secret: ghcr_token
+    commands:
+      - |
+        set -eu
+        set -a
+        . ./.woodpecker-publish.env
+        set +a
+        build_time="$$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '%s' "$${GHCR_TOKEN}" |
+          docker login ghcr.io -u "$${GHCR_USER}" --password-stdin
+
+        docker build --pull --platform linux/arm64 \
+          --provenance=false --sbom=false \
+          --file Dockerfile.wolfi \
+          --build-arg "BUILD_VERSION=$${VERSION}" \
+          --build-arg "BUILD_REVISION=$${CI_COMMIT_SHA}" \
+          --build-arg "BUILD_TIME=$${build_time}" \
+          -t "$${LOCAL_REPO}:$${VERSION}-arm64" .
+
+        for tag in $${TAGS}; do
+          docker tag "$${LOCAL_REPO}:$${VERSION}-arm64" "$${LOCAL_REPO}:$${tag}-arm64"
+          docker tag "$${LOCAL_REPO}:$${VERSION}-arm64" "$${GHCR_REPO}:$${tag}-arm64"
+        done
+
+        for tag in $${TAGS}; do
+          docker push "$${LOCAL_REPO}:$${tag}-arm64"
+          docker push "$${GHCR_REPO}:$${tag}-arm64"
+        done
+
+        echo "Published $${VERSION} for linux/arm64"
+
+  - name: publish-manifest
+    image: docker:29.1.3-cli@sha256:e0b6ff45302985d99b9685b2a2fec50c3379bd47067493968f51da901dc53ad5
+    depends_on: [publish-amd64, publish-arm64]
+    when:
+      - event: push
+        branch: main
+      - event: tag
+      - event: manual
+        branch: main
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+      GHCR_USER:
+        from_secret: ghcr_username
+      GHCR_TOKEN:
+        from_secret: ghcr_token
+    commands:
+      - |
+        set -eu
+        set -a
+        . ./.woodpecker-publish.env
+        set +a
+        printf '%s' "$${GHCR_TOKEN}" |
+          docker login ghcr.io -u "$${GHCR_USER}" --password-stdin
+
+        for tag in $${TAGS}; do
+          docker manifest create --amend --insecure \
+            "$${LOCAL_REPO}:$${tag}" \
+            "$${LOCAL_REPO}:$${tag}-amd64" \
+            "$${LOCAL_REPO}:$${tag}-arm64"
+          docker manifest push --purge --insecure "$${LOCAL_REPO}:$${tag}"
+
+          docker manifest create --amend \
+            "$${GHCR_REPO}:$${tag}" \
+            "$${GHCR_REPO}:$${tag}-amd64" \
+            "$${GHCR_REPO}:$${tag}-arm64"
+          docker manifest push --purge "$${GHCR_REPO}:$${tag}"
+        done
+
+        echo "Published $${VERSION} manifest for linux/amd64 and linux/arm64"
