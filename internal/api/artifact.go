@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"typetype-downloader-go/internal/artifact"
 	"typetype-downloader-go/internal/job"
@@ -15,6 +16,10 @@ func (s *Server) artifact(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	if record.Status != job.StatusDone || record.Artifact == "" {
 		writeError(w, http.StatusConflict, "artifact_not_ready", "artifact is not ready")
+		return
+	}
+	if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now()) {
+		writeError(w, http.StatusNotFound, "not_found", "artifact expired")
 		return
 	}
 	fileName := ""
