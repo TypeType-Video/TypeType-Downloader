@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestStoreCreateStartProgressDone(t *testing.T) {
@@ -138,6 +139,58 @@ func TestStoreDeduplicatesDoneJobs(t *testing.T) {
 	}
 	if second.ID != first.ID || !cached || created {
 		t.Fatalf("second id=%s cached=%v created=%v", second.ID, cached, created)
+	}
+}
+
+func TestStoreCreatesNewJobAfterArtifactExpires(t *testing.T) {
+	store := NewStore("http://localhost")
+	first, _, _, err := store.Create("https://example.com/watch?v=expired", Options{Container: "mp4"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, unsubscribe, ok := store.Subscribe(first.ID)
+	if !ok {
+		t.Fatal("could not subscribe to expired job")
+	}
+	defer unsubscribe()
+	<-events
+	expires := time.Now().Add(-time.Second)
+	store.Done(first.ID, "artifacts/"+first.ID+"/video.mp4", "s3", &expires, 10, 20)
+	<-events
+
+	second, cached, created, err := store.Create("https://example.com/watch?v=expired", Options{Container: "mp4"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID == first.ID || cached || !created {
+		t.Fatalf("second id=%s cached=%v created=%v", second.ID, cached, created)
+	}
+	if event := <-events; event.Status != StatusFailed {
+		t.Fatalf("expired job notification = %+v", event)
+	}
+	if _, ok := store.Get(first.ID); ok {
+		t.Fatal("expired job is still in the store")
+	}
+}
+
+func TestStoreRemovesOnlyMatchingExpiredArtifact(t *testing.T) {
+	store := NewStore("http://localhost")
+	record, _, _, err := store.Create("https://example.com/watch?v=remove-expired", Options{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().Add(-time.Second)
+	location := "artifacts/" + record.ID + "/video.mp4"
+	store.Done(record.ID, location, "s3", &expires, 10, 20)
+
+	if store.RemoveExpiredArtifact(record.ID, "artifacts/other/file.mp4", time.Now()) {
+		t.Fatal("removed an artifact with a different location")
+	}
+	if !store.RemoveExpiredArtifact(record.ID, location, time.Now()) {
+		t.Fatal("did not remove the expired artifact")
+	}
+	if _, ok := store.Get(record.ID); ok {
+		t.Fatal("expired job is still in the store")
 	}
 }
 

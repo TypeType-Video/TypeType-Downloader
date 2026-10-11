@@ -76,18 +76,27 @@ func (s *Store) Create(rawURL string, options Options, authorization string) (*R
 		return nil, false, false, err
 	}
 	record := &Record{ID: id, CacheKey: cacheKey, URL: rawURL, Authorization: authorization, Options: options, Status: StatusQueued, QueuedAt: time.Now()}
+	expiredID := ""
 	s.mu.Lock()
 	if existingID := s.cache[cacheKey]; existingID != "" {
 		if existing := s.jobs[existingID]; existing != nil && existing.Status != StatusFailed {
-			cached := existing.Status == StatusDone
-			snapshot := cloneRecord(existing)
-			s.mu.Unlock()
-			return snapshot, cached, false, nil
+			if !artifactExpired(existing, time.Now()) {
+				cached := existing.Status == StatusDone
+				snapshot := cloneRecord(existing)
+				s.mu.Unlock()
+				return snapshot, cached, false, nil
+			}
+			expiredID = existingID
+			delete(s.jobs, existingID)
+			delete(s.cache, cacheKey)
 		}
 	}
 	s.jobs[id] = record
 	s.cache[cacheKey] = id
 	s.mu.Unlock()
+	if expiredID != "" {
+		s.broadcast(expiredID)
+	}
 	s.broadcast(id)
 	s.notify(record)
 	return cloneRecord(record), false, true, nil
