@@ -40,5 +40,5 @@ func stringValue(value *string) string {
 }
 
 func codecMatches(codec string, prefix string) bool {
-	return codec == "" || strings.HasPrefix(codec, prefix)
+	return codec == "" || strings.HasPrefix(strings.ToLower(codec), strings.ToLower(prefix))
 }
