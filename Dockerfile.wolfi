@@ -5,7 +5,7 @@ ARG BUILD_REVISION=development
 ARG BUILD_TIME=unknown
 USER root
 WORKDIR /src
-RUN apk add --no-cache build-base pkgconf ffmpeg-8.1-dev
+RUN apk add --no-cache build-base pkgconf ffmpeg-9.0-dev
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -15,7 +15,7 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w -X typetype-downloader-go/i
 
 FROM cgr.dev/chainguard/wolfi-base:latest
 
-RUN apk add --no-cache ca-certificates ffmpeg-8.1
+RUN apk add --no-cache ca-certificates ffmpeg-9.0
 
 RUN addgroup -S typetype && adduser -S -G typetype -h /app typetype
 WORKDIR /app
