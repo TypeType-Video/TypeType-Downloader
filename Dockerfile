@@ -1,4 +1,4 @@
-FROM golang:1.27-alpine3.23 AS build
+FROM golang:1.27.2-alpine3.23 AS build
 
 ARG BUILD_VERSION=1.7.0-dev
 ARG BUILD_REVISION=development
@@ -12,7 +12,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w -X typetype-downloader-go/internal/buildinfo.Version=$BUILD_VERSION -X typetype-downloader-go/internal/buildinfo.Revision=$BUILD_REVISION -X typetype-downloader-go/internal/buildinfo.BuildTime=$BUILD_TIME" -o /out/typetype-downloader-go ./cmd/server
 
-FROM alpine:3.23
+FROM alpine:3.23.6
 
 RUN apk add --no-cache ca-certificates ffmpeg
 
