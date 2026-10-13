@@ -48,8 +48,17 @@ func run(ctx context.Context, cfg config.Config) error {
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	runner := pipeline.NewRunner(cfg, store, files, disk)
 	runner.Start(workerCtx)
+	var artifactRepository cleanup.ExpiredArtifactRepository
+	for _, sink := range sinks {
+		if repository, ok := sink.(cleanup.ExpiredArtifactRepository); ok {
+			artifactRepository = repository
+			break
+		}
+	}
+	stopArtifactCleanup := cleanup.StartS3ArtifactCleanup(workerCtx, cfg.StorageBackend, artifactURLTTL(cfg), files, artifactRepository, store)
 	defer func() {
 		cancelWorkers()
+		stopArtifactCleanup()
 		runner.Wait()
 	}()
 	cleanup.Start(workerCtx, cfg.DataDir, cfg.StorageBackend)
@@ -73,10 +82,18 @@ func artifactStore(cfg config.Config) (artifact.Store, error) {
 			Region: cfg.S3Region, Bucket: cfg.S3Bucket,
 			AccessKey: cfg.S3AccessKey, SecretKey: cfg.S3SecretKey,
 			UseSSL: cfg.S3UseSSL, PublicUseSSL: cfg.S3PublicUseSSL,
-			PathStyle: cfg.S3PathStyle, URLTTL: time.Duration(cfg.ArtifactTTL) * time.Second,
+			PathStyle: cfg.S3PathStyle, URLTTL: artifactURLTTL(cfg),
 		})
 	}
 	return artifact.NewLocalStore(), nil
+}
+
+func artifactURLTTL(cfg config.Config) time.Duration {
+	ttl := time.Duration(cfg.ArtifactTTL) * time.Second
+	if ttl <= 0 {
+		return 15 * time.Minute
+	}
+	return ttl
 }
 
 func sinks(ctx context.Context, cfg config.Config) ([]job.Sink, []api.HealthCheck, []*job.Record, []*job.Record, func(), error) {

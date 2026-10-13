@@ -100,6 +100,26 @@ func TestPostgresJobRoundTrip(t *testing.T) {
 			if err != nil || len(queued) != 0 {
 				t.Fatalf("completed job remains runnable: %v, %v", queued, err)
 			}
+			expiredRecord := *record
+			expiredRecord.ID = "expired-artifact"
+			expiredRecord.Artifact = "artifacts/expired-artifact/video.mp4"
+			expiredAt := now.Add(-time.Hour)
+			expiredRecord.ExpiresAt = &expiredAt
+			if err := sink.upsert(ctx, &expiredRecord); err != nil {
+				t.Fatal(err)
+			}
+			cutoff := time.Now()
+			expiredArtifacts, err := sink.ListExpiredArtifacts(ctx, cutoff, "", 10)
+			if err != nil || len(expiredArtifacts) != 1 || expiredArtifacts[0].ID != expiredRecord.ID {
+				t.Fatalf("expired artifacts = %+v, %v", expiredArtifacts, err)
+			}
+			if err := sink.DeleteExpiredArtifact(ctx, expiredArtifacts[0], cutoff); err != nil {
+				t.Fatal(err)
+			}
+			remaining, err := sink.ListExpiredArtifacts(ctx, cutoff, "", 10)
+			if err != nil || len(remaining) != 0 {
+				t.Fatalf("expired artifacts after deletion = %+v, %v", remaining, err)
+			}
 		})
 	}
 }
