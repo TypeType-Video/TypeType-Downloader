@@ -12,7 +12,7 @@ import (
 func consumeDownloadStream(
 	reader io.Reader,
 	tracks []streamTrack,
-	progress *reporter,
+	progress byteCounter,
 	writeInitialization bool,
 ) error {
 	var magic [downloadMagicSize]byte
@@ -58,7 +58,7 @@ func consumeFrame(
 	track *streamTrack,
 	header frameHeader,
 	buffer []byte,
-	progress *reporter,
+	progress byteCounter,
 	writeInitialization bool,
 ) error {
 	output := io.Writer(track.output)

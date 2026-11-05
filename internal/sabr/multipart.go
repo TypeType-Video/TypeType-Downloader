@@ -32,7 +32,7 @@ func downloadParts(
 				if ctx.Err() != nil {
 					return
 				}
-				if err := downloadPart(ctx, client, options, part, parts, progress); err != nil {
+				if err := downloadPartWithRetry(ctx, client, options, part, parts, progress); err != nil {
 					select {
 					case failures <- err:
 					default:
@@ -56,13 +56,39 @@ func downloadParts(
 	return nil
 }
 
-func downloadPart(
+func downloadPartWithRetry(
 	ctx context.Context,
 	client *http.Client,
 	options Options,
 	part int,
 	parts int,
 	progress *reporter,
+) error {
+	var err error
+	for attempt := 1; attempt <= partAttempts; attempt++ {
+		counter := &partProgress{parent: progress}
+		err = downloadPart(ctx, client, options, part, parts, counter)
+		if err == nil {
+			return nil
+		}
+		counter.rollback()
+		if ctx.Err() != nil || attempt == partAttempts {
+			break
+		}
+		if waitErr := retryDelay(ctx, attempt); waitErr != nil {
+			return waitErr
+		}
+	}
+	return err
+}
+
+func downloadPart(
+	ctx context.Context,
+	client *http.Client,
+	options Options,
+	part int,
+	parts int,
+	progress byteCounter,
 ) error {
 	partCtx, watchdog := newIdleWatchdog(ctx, options.IdleTimeout)
 	defer watchdog.stop()
@@ -93,4 +119,7 @@ func downloadPart(
 	return closeTracks(tracks)
 }
 
-const maxConcurrentPartDownloads = 3
+const (
+	maxConcurrentPartDownloads = 3
+	partAttempts               = 3
+)

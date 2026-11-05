@@ -6,6 +6,25 @@ import (
 	"time"
 )
 
+type byteCounter interface {
+	add(bytes int64)
+}
+
+type partProgress struct {
+	parent *reporter
+	bytes  int64
+}
+
+func (p *partProgress) add(bytes int64) {
+	p.bytes += bytes
+	p.parent.add(bytes)
+}
+
+func (p *partProgress) rollback() {
+	p.parent.add(-p.bytes)
+	p.bytes = 0
+}
+
 type reporter struct {
 	downloaded atomic.Int64
 	progress   ProgressFunc

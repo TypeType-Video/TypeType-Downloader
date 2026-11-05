@@ -15,6 +15,9 @@ func Download(ctx context.Context, client *http.Client, options Options, progres
 	reporter := newReporter(progress)
 	var last error
 	for attempt := 1; attempt <= downloadAttempts; attempt++ {
+		if attempt > 1 {
+			parts = 1
+		}
 		reporter.beginAttempt()
 		if err := downloadAttempt(ctx, client, options, parts, reporter); err == nil {
 			reporter.finish()
