@@ -11,13 +11,13 @@ import (
 )
 
 func Download(ctx context.Context, client *http.Client, options Options, progress ProgressFunc) error {
-	parts := downloadPartCount(options)
+	plans := []int{downloadPartCount(options)}
+	if plans[0] > 1 {
+		plans = append(plans, 1)
+	}
 	reporter := newReporter(progress)
 	var last error
-	for attempt := 1; attempt <= downloadAttempts; attempt++ {
-		if attempt > 1 {
-			parts = 1
-		}
+	for attempt, parts := range plans {
 		reporter.beginAttempt()
 		if err := downloadAttempt(ctx, client, options, parts, reporter); err == nil {
 			reporter.finish()
@@ -28,13 +28,13 @@ func Download(ctx context.Context, client *http.Client, options Options, progres
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if attempt < downloadAttempts {
-			if err := retryDelay(ctx, attempt); err != nil {
+		if attempt+1 < len(plans) {
+			if err := retryDelay(ctx, attempt+1); err != nil {
 				return err
 			}
 		}
 	}
-	return fmt.Errorf("SABR download failed after %d attempts: %w", downloadAttempts, last)
+	return fmt.Errorf("SABR download failed after %d attempts: %w", len(plans), last)
 }
 
 func downloadAttempt(
@@ -101,8 +101,6 @@ func requestDownload(
 	}
 	return response, nil
 }
-
-const downloadAttempts = 2
 
 func downloadPartCount(options Options) int {
 	if options.Parts > 0 {
